@@ -109,3 +109,8 @@ python main.py
 ```
 
 This starts an interactive game where you play against Aurelius as the opponent.
+
+## Benchmark
+
+- Estimated ~600ELO on Chess.com against Komodo 6 at 1000ELO
+- 

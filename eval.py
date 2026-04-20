@@ -206,7 +206,7 @@ def evaluate(board):
 
             for target_square in attacks:
                 target_piece = board.piece_at(target_square)
-                # check if it's a white piece
+                # check if it's a black piece
                 if target_piece is not None and target_piece.color == chess.BLACK:
                     value = piece_values[target_piece.piece_type]
                     score -= value/5
@@ -222,7 +222,7 @@ def evaluate(board):
 
             for target_square in attacks:
                 target_piece = board.piece_at(target_square)
-                # check if it's a black piece
+                # check if it's a white piece
                 if target_piece is not None and target_piece.color == chess.WHITE:
                     value = piece_values[target_piece.piece_type]
                     score += value/5
