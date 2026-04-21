@@ -3,6 +3,7 @@ import eval
 import syzygy
 
 DEPTH = 5
+USE_SYZYGY = True
 nodes_evaluated = 0
 tt_hits = 0
 null_move_cutoffs = 0
@@ -159,18 +160,19 @@ def minimax(
         return eval.evaluate(board)
     
     # Check if we can use syzygy tablebase for endgames
-    piece_count = syzygy.get_piece_count(board)
-    if piece_count <= 7:
-        syzygy_move = syzygy.get_syzygy_move(board)
-        if syzygy_move is not None:
-            # Syzygy found a move, evaluate it and use it directly
-            board.push(syzygy_move)
-            score = minimax(
-                board, depth - 1, alpha, beta, not is_maximizing,
-                use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, allow_null=True
-            )
-            board.pop()
-            return score
+    if USE_SYZYGY:
+        piece_count = syzygy.get_piece_count(board)
+        if piece_count <= 7:
+            syzygy_move = syzygy.get_syzygy_move(board)
+            if syzygy_move is not None:
+                # Syzygy found a move, evaluate it and use it directly
+                board.push(syzygy_move)
+                score = minimax(
+                    board, depth - 1, alpha, beta, not is_maximizing,
+                    use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, allow_null=True
+                )
+                board.pop()
+                return score
 
     alpha_original = alpha
     beta_original = beta
@@ -398,13 +400,14 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
     lmr_reductions = 0
 
     # Check for syzygy tablebase move in endgames (7 or fewer pieces)
-    piece_count = syzygy.get_piece_count(board)
-    if piece_count <= 7:
-        syzygy_move = syzygy.get_syzygy_move(board)
-        if syzygy_move is not None:
-            if verbose:
-                print(f"Using Syzygy tablebase move: {syzygy_move}")
-            return syzygy_move
+    if USE_SYZYGY:
+        piece_count = syzygy.get_piece_count(board)
+        if piece_count <= 7:
+            syzygy_move = syzygy.get_syzygy_move(board)
+            if syzygy_move is not None:
+                if verbose:
+                    print(f"Using Syzygy tablebase move: {syzygy_move}")
+                return syzygy_move
 
     if reset_tt:
         transposition_table.clear()

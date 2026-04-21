@@ -11,13 +11,13 @@ version = "0.1.1"
 name = "Aurelius"
 SEARCH_VERBOSE = True
 USE_OPENING_BOOK = True
+USE_SYZYGY = True
 ENGINE_COLOR = chess.WHITE
 OPENING_BOOK_PATH = os.path.join(os.path.dirname(__file__), "openings", "openings.json")
 
 board = chess.Board()
 opening_book = OpeningBook(OPENING_BOOK_PATH, enabled=USE_OPENING_BOOK)
 current_opening_name = None
-
 
 def parse_user_move_safely(board, raw_move):
     text = raw_move.strip()
@@ -87,6 +87,7 @@ while not board.is_game_over():
             end_time = time.perf_counter() - start_time
 
             print(f"{name} plays: {comp_move}")
+            print(f"Time taken: {end_time:.2f} seconds")
             board.push(comp_move)
             print(board)
         except Exception as e:

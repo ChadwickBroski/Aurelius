@@ -93,7 +93,8 @@ Version `0.1.1`
 - **Transposition Table Size**: 200,000 entries maximum
 - **Null Move Settings**: Minimum depth 3, reduction of 1-2 plies
 - **LMR Settings**: Minimum depth 3, applies to moves after index 3
-- **Syzygy Settings**: Activated for positions with 7 or fewer pieces, 5 second timeout
+- **Syzygy Settings**: Activated for positions with 7 or fewer pieces (5 second timeout)
+  - Configurable via `USE_SYZYGY` in `play.py` or `search.py` (default: True)
 - **Verbose Logging**: Optional detailed move analysis and statistics
 - **Error Handling**: Graceful handling of illegal moves with informative error messages
 - **Performance Metrics**: Tracks nodes evaluated, TT cache hits, null move cutoffs, and LMR reductions per search
