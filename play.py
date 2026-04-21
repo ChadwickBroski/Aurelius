@@ -11,7 +11,6 @@ version = "0.1.1"
 name = "Aurelius"
 SEARCH_VERBOSE = True
 USE_OPENING_BOOK = True
-USE_SYZYGY = True
 ENGINE_COLOR = chess.WHITE
 OPENING_BOOK_PATH = os.path.join(os.path.dirname(__file__), "openings", "openings.json")
 
