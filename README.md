@@ -5,7 +5,7 @@
 
 A free, open source, Python-based chess engine with advanced search algorithms, sophisticated position evaluation, and opening book support.
 
-Version `0.1.0`
+Version `0.1.1`
 
 </div>
 
@@ -66,6 +66,17 @@ Version `0.1.0`
 - **Line Validation**: Ensures all stored lines are legal and playable before loading
 - **Statistics Tracking**: Reports total loaded lines from opening book
 
+### Endgame Tablebases (Syzygy)
+- **Lichess Syzygy API Integration**: Queries online tablebase for perfect endgame play
+  - Activated for positions with 7 or fewer pieces
+  - Provides best moves with distance-to-zero (DTZ) metrics
+- **Move Optimization**: Filters out zeroing moves to prioritize winning/drawing lines
+- **Graceful Fallback**: Automatically switches to regular evaluation if:
+  - API is unavailable or times out
+  - Position has more than 7 pieces
+  - API returns no valid moves
+- **Performance**: Fast endgame play through proven tablebase knowledge
+
 ### Interactive Gameplay
 - **Human vs Engine**: Play as White or Black against the engine
 - **Flexible Move Input**: 
@@ -82,6 +93,7 @@ Version `0.1.0`
 - **Transposition Table Size**: 200,000 entries maximum
 - **Null Move Settings**: Minimum depth 3, reduction of 1-2 plies
 - **LMR Settings**: Minimum depth 3, applies to moves after index 3
+- **Syzygy Settings**: Activated for positions with 7 or fewer pieces, 5 second timeout
 - **Verbose Logging**: Optional detailed move analysis and statistics
 - **Error Handling**: Graceful handling of illegal moves with informative error messages
 - **Performance Metrics**: Tracks nodes evaluated, TT cache hits, null move cutoffs, and LMR reductions per search
@@ -94,6 +106,7 @@ play.py          - Interactive chess gameplay interface
 search.py        - Minimax search with alpha-beta pruning, optimizations
 eval.py          - Position evaluation function with piece-square tables
 opening_book.py  - Opening book management and move selection
+syzygy.py        - Endgame tablebase queries via Lichess Syzygy API
 openings/        - Opening book JSON data
 __init__.py      - Package initialization
 ```

@@ -404,7 +404,6 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
         if syzygy_move is not None:
             if verbose:
                 print(f"Using Syzygy tablebase move: {syzygy_move}")
-                print(f"Piece count: {piece_count}")
             return syzygy_move
 
     if reset_tt:
@@ -448,11 +447,6 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
                 best_move = move
 
     if verbose:
-        print(
-            f"Best move: {best_move}, Best score: {best_score}, "
-            f"Nodes evaluated: {nodes_evaluated}, TT hits: {tt_hits}, "
-            f"Null cutoffs: {null_move_cutoffs}, LMR reductions: {lmr_reductions}"
-        )
         print(f"Board evaluation: {eval.evaluate(board)}")
 
     return best_move
