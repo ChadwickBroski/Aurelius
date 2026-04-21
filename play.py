@@ -7,14 +7,14 @@ import time
 from chess import IllegalMoveError, InvalidMoveError, AmbiguousMoveError
 from opening_book import OpeningBook
 
-version = "0.1.1"
+version = "0.1.0"
 name = "Aurelius"
 SEARCH_VERBOSE = True
 USE_OPENING_BOOK = True
 ENGINE_COLOR = chess.WHITE
 OPENING_BOOK_PATH = os.path.join(os.path.dirname(__file__), "openings", "openings.json")
 
-board = chess.Board()
+board = chess.Board("6k1/5p2/8/8/8/1R3P2/3K4/8 w - - 0 1")
 opening_book = OpeningBook(OPENING_BOOK_PATH, enabled=USE_OPENING_BOOK)
 current_opening_name = None
 
@@ -56,6 +56,8 @@ def parse_user_move_safely(board, raw_move):
 
 print(f"Playing with {name} {version}")
 print(board)
+if USE_OPENING_BOOK:
+    print(f"Opening book lines loaded: {opening_book.loaded_lines}")
 
 if ENGINE_COLOR not in (chess.WHITE, chess.BLACK):
     print("Invalid ENGINE_COLOR. Use chess.WHITE or chess.BLACK.")
@@ -80,14 +82,21 @@ while not board.is_game_over():
                 comp_move = book_move
                 if opening_name != current_opening_name:
                     current_opening_name = opening_name
+                    print(f"Opening selected: {opening_name}")
+                if SEARCH_VERBOSE:
+                    print(f"Book move: {opening_san}")
             else:
+                if SEARCH_VERBOSE and opening_name and book_status == "deviated":
+                    print(f"Opening line deviated from {opening_name}, switching to search.")
+                if SEARCH_VERBOSE and opening_name and book_status == "line_complete":
+                    print(f"Opening line complete for {opening_name}, switching to search.")
                 comp_move = search.search(board, verbose=SEARCH_VERBOSE)
 
             end_time = time.perf_counter() - start_time
 
             print(f"{name} plays: {comp_move}")
-            print(f"Time taken: {end_time:.2f} seconds")
             board.push(comp_move)
+            print(f"Move evaluated in {end_time} seconds.")
             print(board)
         except Exception as e:
             print(f"Engine error: {e}")

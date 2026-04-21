@@ -2,7 +2,16 @@ import requests
 import chess
 
 SYZYGY_API_URL = "https://tablebase.lichess.ovh/standard"
+USE_SYZYGY = False
 TIMEOUT = 5
+
+syzygy_failed = False
+
+def syzygy_error():
+    global syzygy_failed
+    if not syzygy_failed:
+        print("Syzygy API not responding, switching to evaluation")
+        syzygy_failed = True
 
 
 def get_piece_count(board):
@@ -11,18 +20,19 @@ def get_piece_count(board):
 
 
 def get_syzygy_move(board):
-    """
-    Query Lichess syzygy tablebase API and return the best move.
-    Returns the best move as a chess.Move object or None.
-    """
+    global syzygy_failed
+
+    if not USE_SYZYGY:
+        return None
+
     piece_count = get_piece_count(board)
     
-    # Only query syzygy for endgames with 7 or fewer pieces
     if piece_count > 7:
         return None
     
-    print(f"Pieces Below 7, activate syzygy API")
-    
+    if not syzygy_failed:
+        print("Pieces Below 7, activate syzygy API")
+        
     try:
         fen = board.fen()
         params = {"fen": fen}
@@ -32,29 +42,27 @@ def get_syzygy_move(board):
         
         data = response.json()
         
-        # Check if there are moves available
+        syzygy_failed = False
+        
         if not data or "moves" not in data or not data["moves"]:
-            print("Syzygy API not responding, switching to evaluation")
+            syzygy_error()
             return None
         
         moves = data["moves"]
         
-        # Remove moves where zeroing is True
-        for move in moves[:]:  # Iterate over a copy to safely remove items
+        for move in moves[:]:
             if move.get("zeroing", False):
                 moves.remove(move)
         
         if not moves:
-            print("Syzygy API not responding, switching to evaluation")
+            syzygy_error()
             return None
         
-        # Get the best move (first move in the filtered list)
         best = moves[0]
         
-        # Convert SAN notation to chess move
         san = best.get("san")
         if not san:
-            print("Syzygy API not responding, switching to evaluation")
+            syzygy_error()
             return None
         
         try:
@@ -63,19 +71,19 @@ def get_syzygy_move(board):
             dtz = best.get("dtz", "N/A")
             print(f"Syzygy found best move: {move} (Category: {category}, DTZ: {dtz})")
             return move
-        except Exception as e:
-            print("Syzygy API not responding, switching to evaluation")
+        except Exception:
+            syzygy_error()
             return None
     
     except requests.exceptions.Timeout:
-        print("Syzygy API not responding, switching to evaluation")
+        syzygy_error()
         return None
     except requests.exceptions.ConnectionError:
-        print("Syzygy API not responding, switching to evaluation")
+        syzygy_error()
         return None
-    except requests.exceptions.RequestException as e:
-        print("Syzygy API not responding, switching to evaluation")
+    except requests.exceptions.RequestException:
+        syzygy_error()
         return None
-    except Exception as e:
-        print("Syzygy API not responding, switching to evaluation")
+    except Exception:
+        syzygy_error()
         return None
