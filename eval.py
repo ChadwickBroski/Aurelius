@@ -227,6 +227,11 @@ def evaluate(board):
                     value = piece_values[target_piece.piece_type]
                     score += value/5
 
+    if board.is_check():
+        if board.turn == chess.WHITE:
+            score -= 50  # Black is checking, good for Black
+        else:
+            score += 50  # White is checking, good for White
 
     if board.is_checkmate():
         if board.turn == chess.WHITE:
