@@ -11,12 +11,16 @@ version = "0.1.0"
 name = "Aurelius"
 SEARCH_VERBOSE = True
 USE_OPENING_BOOK = True
+DEBUG_PREDICT_REPLY = False
+PREDICT_REPLY_DEPTH = search.DEPTH
+
 ENGINE_COLOR = chess.WHITE
 OPENING_BOOK_PATH = os.path.join(os.path.dirname(__file__), "openings", "openings.json")
 
-board = chess.Board("6k1/5p2/8/8/8/1R3P2/3K4/8 w - - 0 1")
+board = chess.Board()
 opening_book = OpeningBook(OPENING_BOOK_PATH, enabled=USE_OPENING_BOOK)
 current_opening_name = None
+
 
 def parse_user_move_safely(board, raw_move):
     text = raw_move.strip()
@@ -93,9 +97,14 @@ while not board.is_game_over():
                 comp_move = search.search(board, verbose=SEARCH_VERBOSE)
 
             end_time = time.perf_counter() - start_time
-
             print(f"{name} plays: {comp_move}")
-            board.push(comp_move)
+            board.push(comp_move) # type: ignore
+            if DEBUG_PREDICT_REPLY and not board.is_game_over():
+                predicted_reply = search.predict_reply(board, depth=PREDICT_REPLY_DEPTH)
+                if predicted_reply is not None:
+                    print(f"Debug predicted reply: {board.san(predicted_reply)} ({predicted_reply})")
+                else:
+                    print("Debug predicted reply: none")
             print(f"Move evaluated in {end_time} seconds.")
             print(board)
         except Exception as e:

@@ -16,6 +16,9 @@ Version `0.1.1`
 - **Minimax Search with Alpha-Beta Pruning**: Efficient game tree exploration with alpha-beta pruning for optimal move selection
 - **Configurable Search Depth**: Default depth of 5 plies (adjustable via `DEPTH` constant in `search.py`)
 
+> Note: Aurelius is a command line program. You may want to use it in your own chess GUI.
+> It is confirmed that CuteChess is compatible.
+
 ### Advanced Search Optimizations
 - **Transposition Tables (TT)**: Caches evaluated positions to avoid redundant calculations
   - Stores depth, score, flags (exact/lower/upper bounds), and best moves

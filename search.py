@@ -1,8 +1,10 @@
 ﻿import chess
 import eval
 import syzygy
+import sys
+import time
 
-DEPTH = 5
+DEPTH = 4
 nodes_evaluated = 0
 tt_hits = 0
 null_move_cutoffs = 0
@@ -27,7 +29,11 @@ TT_MAX_ENTRIES = 200000
 
 NULL_MOVE_MIN_DEPTH = 3
 LMR_MIN_DEPTH = 3
-LMR_START_MOVE_INDEX = 3
+LMR_START_MOVE_INDEX = 4
+LMR_MIN_LEGAL_MOVES = 8
+ROOT_CHECKMATE_SCORE = 1000000
+EVAL_CHECKMATE_SCORE = 10000000
+
 
 def board_key(board):
     # python-chess exposes a private but fast transposition key.
@@ -53,6 +59,7 @@ def has_non_pawn_material(board, color):
         or board.pieces(chess.ROOK, color)
         or board.pieces(chess.QUEEN, color)
     )
+
 
 def store_tt_entry(tt_key, depth, score, flag, best_move):
     if tt_key is None:
@@ -157,7 +164,7 @@ def minimax(
 
     if depth == 0 or board.is_game_over():
         return eval.evaluate(board)
-    
+
     # Check if we can use syzygy tablebase for endgames
     piece_count = syzygy.get_piece_count(board)
     if piece_count <= 7:
@@ -238,6 +245,7 @@ def minimax(
                 return null_score
 
     legal_moves = order_inner_moves(board, depth, tt_move=tt_move)
+    legal_move_count = len(legal_moves)
 
     if is_maximizing:
         node_score = float("-inf")
@@ -249,6 +257,7 @@ def minimax(
                 use_lmr
                 and depth >= LMR_MIN_DEPTH
                 and move_index >= LMR_START_MOVE_INDEX
+                and legal_move_count >= LMR_MIN_LEGAL_MOVES
                 and is_quiet
                 and not board.is_check()
             )
@@ -318,6 +327,7 @@ def minimax(
                 use_lmr
                 and depth >= LMR_MIN_DEPTH
                 and move_index >= LMR_START_MOVE_INDEX
+                and legal_move_count >= LMR_MIN_LEGAL_MOVES
                 and is_quiet
                 and not board.is_check()
             )
@@ -390,12 +400,14 @@ def minimax(
     return node_score
 
 
-def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, verbose=False):
+def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, verbose=False, depth=DEPTH, uci_output=False):
     global nodes_evaluated, tt_hits, null_move_cutoffs, lmr_reductions
     nodes_evaluated = 0
     tt_hits = 0
     null_move_cutoffs = 0
     lmr_reductions = 0
+    search_depth = max(1, depth)
+    start_time = time.perf_counter()
 
     # Check for syzygy tablebase move in endgames (7 or fewer pieces)
     piece_count = syzygy.get_piece_count(board)
@@ -422,9 +434,16 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
 
     for move in legal_moves:
         board.push(move)
+        if board.is_checkmate():
+            board.pop()
+            if verbose:
+                print(f"Move: {move}, Score: {ROOT_CHECKMATE_SCORE}")
+                print(f"Immediate checkmate found. Playing: {move}")
+            return move
+
         score = minimax(
             board,
-            DEPTH - 1,
+            search_depth - 1,
             float("-inf"),
             float("inf"),
             board.turn == chess.WHITE,
@@ -438,6 +457,16 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
         if verbose:
             print(f"Move: {move}, Score: {score}")
 
+        # If search already found a forced mate, no need to inspect other root moves.
+        if board.turn == chess.WHITE and score >= EVAL_CHECKMATE_SCORE:
+            if verbose:
+                print(f"Forced checkmate found. Playing: {move}")
+            return move
+        if board.turn == chess.BLACK and score <= -EVAL_CHECKMATE_SCORE:
+            if verbose:
+                print(f"Forced checkmate found. Playing: {move}")
+            return move
+
         if board.turn == chess.WHITE:
             if score > best_score:
                 best_score = score
@@ -448,11 +477,48 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
                 best_move = move
 
     if verbose:
-
+        print(
+            f"Best move: {best_move}, Best score: {best_score}, "
+            f"Nodes evaluated: {nodes_evaluated}, TT hits: {tt_hits}, "
+            f"Null cutoffs: {null_move_cutoffs}, LMR reductions: {lmr_reductions}"
+        )
         print(f"Board evaluation: {eval.evaluate(board)}")
+
+    if uci_output and best_move is not None:
+        elapsed = time.perf_counter() - start_time
+        nps = int(nodes_evaluated / elapsed) if elapsed > 0.001 else 0
+        # Clamp score away from inf/-inf (checkmate scores)
+        cp = int(max(-100000, min(100000, best_score)))
+        pv = best_move.uci()
+        print(f"info depth {search_depth} score cp {cp} nodes {nodes_evaluated} nps {nps} time {int(elapsed * 1000)} pv {pv}")
+        sys.stdout.flush()
 
     return best_move
 
 
+def predict_reply(board, depth=DEPTH, use_null=False, use_lmr=True, verbose=False):
+    """Return the opponent's likely best reply without changing normal search state."""
+    global nodes_evaluated, tt_hits, null_move_cutoffs, lmr_reductions, killer_moves
 
+    saved_nodes_evaluated = nodes_evaluated
+    saved_tt_hits = tt_hits
+    saved_null_move_cutoffs = null_move_cutoffs
+    saved_lmr_reductions = lmr_reductions
+    saved_killer_moves = killer_moves.copy()
 
+    try:
+        return search(
+            board.copy(stack=False),
+            use_tt=False,
+            use_null=use_null,
+            use_lmr=use_lmr,
+            reset_tt=False,
+            verbose=verbose,
+            depth=depth,
+        )
+    finally:
+        nodes_evaluated = saved_nodes_evaluated
+        tt_hits = saved_tt_hits
+        null_move_cutoffs = saved_null_move_cutoffs
+        lmr_reductions = saved_lmr_reductions
+        killer_moves = saved_killer_moves

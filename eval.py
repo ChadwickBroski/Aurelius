@@ -1,6 +1,9 @@
 ﻿import chess
 
 def evaluate(board):
+
+    score = 0
+    
     # Simple evaluation function based on material count
     piece_values = {
         chess.PAWN: 10,
@@ -13,7 +16,7 @@ def evaluate(board):
 
     pawn_table = [
         [0,   0,   0,   0,   0,   0,   0,   0],
-        [50,  50,  50,  50,  50,  50,  50,  50],
+        [5,   5,   5,   5,   5,   5,   5,   5],
         [10,  10,  10,  10,  10,  10,  10,  10],
         [5,   5,  10,  20,  20,  10,   5,   5],
         [0,   0,   5,  15,  15,   5,   0,   0],
@@ -35,12 +38,12 @@ def evaluate(board):
 
     bishop_table = [
         [-20, -10, -10, -10, -10, -10, -10, -20],
-        [-10,   0,   0,   0,   0,   0,   0, -10],
+        [-10,   -20,   0,   0,   0,   0,   -20, -10],
         [-10,   0,  10,  10,  10,  10,   0, -10],
         [-10,  10,  10,  20,  20,  10,  10, -10],
         [-10,  10,  10,  20,  20,  10,  10, -10],
         [-10,   0,  10,  10,  10,  10,   0, -10],
-        [-10,   0,   0,   0,   0,   0,   0, -10],
+        [-10,   20,   0,   0,   0,   0,   20, -10],
         [-20, -10, -10, -10, -10, -10, -10, -20]
     ]
 
@@ -106,7 +109,6 @@ def evaluate(board):
     pst_weight = current_non_king_material / starting_non_king_material
     pst_weight = max(0.0, min(1.0, pst_weight))
 
-    score = 0
     for piece_type in piece_values:
         score += len(board.pieces(piece_type, chess.WHITE)) * piece_values[piece_type]
         score -= len(board.pieces(piece_type, chess.BLACK)) * piece_values[piece_type]
@@ -159,10 +161,13 @@ def evaluate(board):
 
     # King mobility penalty/bonus (weighted like PST):
     # black king mobility is a black penalty (+score), white king mobility is a white penalty (-score)
-    pst_score += (black_king_non_capture_squares - white_king_non_capture_squares) * 2
+    # Bonus for white when black king mobility is more
+    score += black_king_non_capture_squares
+
+    # Bonus for black when white king mobility is more
+    score -= white_king_non_capture_squares
 
     score += pst_score * pst_weight
-
 
     # Add attack bonus for BLACK attacking WHITE
     for square in chess.SQUARES:
@@ -177,7 +182,7 @@ def evaluate(board):
                 # check if it's a white piece
                 if target_piece is not None and target_piece.color == chess.WHITE:
                     value = piece_values[target_piece.piece_type]
-                    score -= value/5
+                    score -= value/7
     
     # Add attack bonus for WHITE attacking BLACK
     for square in chess.SQUARES:
@@ -193,7 +198,7 @@ def evaluate(board):
                 # check if it's a black piece
                 if target_piece is not None and target_piece.color == chess.BLACK:
                     value = piece_values[target_piece.piece_type]
-                    score += value/5
+                    score += value/7
 
     
     # Add defense bonus for BLACK
@@ -206,10 +211,10 @@ def evaluate(board):
 
             for target_square in attacks:
                 target_piece = board.piece_at(target_square)
-                # check if it's a black piece
+                # check if it's a white piece
                 if target_piece is not None and target_piece.color == chess.BLACK:
                     value = piece_values[target_piece.piece_type]
-                    score -= value/5
+                    score -= value/7
     
     # Add defense bonus for WHITE
     for square in chess.SQUARES:
@@ -222,23 +227,23 @@ def evaluate(board):
 
             for target_square in attacks:
                 target_piece = board.piece_at(target_square)
-                # check if it's a white piece
+                # check if it's a black piece
                 if target_piece is not None and target_piece.color == chess.WHITE:
                     value = piece_values[target_piece.piece_type]
-                    score += value/5
+                    score += value/7
 
     if board.is_check():
         if board.turn == chess.WHITE:
-            score -= 50  # Black is checking, good for Black
+            score -= 10  # Black is giving check, good for Black
         else:
-            score += 50  # White is checking, good for White
+            score += 10  # White is giving check, good for White
 
     if board.is_checkmate():
         if board.turn == chess.WHITE:
             return -10000000  # Black wins
         return 10000000  # White wins
-
-    if board.is_stalemate() or board.is_insufficient_material():
-        return 0
+    
+    if board.is_stalemate() or board.is_insufficient_material() or board.is_seventyfive_moves() or board.is_fivefold_repetition() or board.can_claim_draw() or board.can_claim_threefold_repetition() or board.can_claim_fifty_moves() or board.is_repetition(3) or board.is_fifty_moves() or board.is_variant_draw():
+        return 0 # Draw
 
     return score

@@ -2,7 +2,7 @@ import requests
 import chess
 
 SYZYGY_API_URL = "https://tablebase.lichess.ovh/standard"
-USE_SYZYGY = False
+USE_SYZYGY = True
 TIMEOUT = 5
 
 syzygy_failed = False
@@ -49,10 +49,6 @@ def get_syzygy_move(board):
             return None
         
         moves = data["moves"]
-        
-        for move in moves[:]:
-            if move.get("zeroing", False):
-                moves.remove(move)
         
         if not moves:
             syzygy_error()
