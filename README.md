@@ -5,7 +5,7 @@
 
 A free, open source, Python-based chess engine with advanced search algorithms, sophisticated position evaluation, and opening book support.
 
-Version `0.1.1`
+Version `0.2.0`
 
 </div>
 
