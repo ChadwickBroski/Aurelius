@@ -91,7 +91,7 @@ Version `0.2.0`
 
 ## Small Implementation Details
 
-- **Version**: 0.1.0
+- **Version**: 0.2.0
 - **Default Engine Color**: White
 - **Transposition Table Size**: 200,000 entries maximum
 - **Null Move Settings**: Minimum depth 3, reduction of 1-2 plies
@@ -130,4 +130,3 @@ This starts an interactive game where you play against Aurelius as the opponent.
 ## Benchmark
 
 - Estimated ~600ELO on Chess.com against Komodo 6 at 1000ELO
-- 
