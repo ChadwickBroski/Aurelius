@@ -6,6 +6,7 @@
 A free, open source, Python-based chess engine with advanced search algorithms, sophisticated position evaluation, and opening book support.
 
 Version `0.2.0`
+ELO `~1450`
 
 </div>
 
@@ -130,4 +131,5 @@ This starts an interactive game where you play against Aurelius as the opponent.
 ## Benchmark
 
 - Estimated ~600ELO on Chess.com against Komodo 6 at 1000ELO (0.1.1)
-> New benchmark will be updated shortly
+- Estimated **~1450ELO** on chessigma.com against Stockfish 18 at max (0.2.0)
+noice
