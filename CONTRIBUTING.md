@@ -38,6 +38,12 @@ Pull requests are welcome. Please try to:
 * Explain what the change does and why it is beneficial.
 * Include testing information when applicable.
 
+### Development Branch
+
+Please make changes in the `dev` branch rather than `main`.
+
+The `main` branch is intended to remain stable, while new features, fixes, and experiments should be developed in `dev`. Pull requests should target the `dev` branch or will be closed.
+
 ## Questions?
 
 Open an issue—I'm happy to help!
