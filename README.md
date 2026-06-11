@@ -132,4 +132,4 @@ This starts an interactive game where you play against Aurelius as the opponent.
 
 - Estimated ~600ELO on Chess.com against Komodo 6 at 1000ELO (0.1.1)
 - Estimated **~1450ELO** on chessigma.com against Stockfish 18 at max (0.2.0)
-noice
+> Chess.com is not used anymore because the rating estimator requires both players to have an official established rating attached to the game (e.g., in imported PGNs). If the ratings are missing or set to zero, the estimator will return zero/nothing.
