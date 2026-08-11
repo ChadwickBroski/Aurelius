@@ -2,7 +2,7 @@ import requests
 import chess
 
 SYZYGY_API_URL = "https://tablebase.lichess.ovh/standard"
-USE_SYZYGY = True
+USE_SYZYGY = False
 TIMEOUT = 5
 
 syzygy_failed = False

@@ -7,12 +7,20 @@ import time
 from chess import IllegalMoveError, InvalidMoveError, AmbiguousMoveError
 from opening_book import OpeningBook
 
-version = "0.1.0"
+version = "0.2.1"
 name = "Aurelius"
 SEARCH_VERBOSE = True
 USE_OPENING_BOOK = True
 DEBUG_PREDICT_REPLY = False
 PREDICT_REPLY_DEPTH = search.DEPTH
+
+# Iterative deepening: search as deep as fits in this many seconds per
+# move, printing a line per completed depth (since SEARCH_VERBOSE=True
+# feeds into search()'s own verbose depth-by-depth printing), instead of
+# always stopping at a fixed depth. Set to None to fall back to the old
+# fixed-depth behavior (search.DEPTH).
+MOVE_TIME_SECONDS = 5.0
+MAX_ITERATIVE_DEPTH = 99
 
 ENGINE_COLOR = chess.WHITE
 OPENING_BOOK_PATH = os.path.join(os.path.dirname(__file__), "openings", "openings.json")
@@ -94,7 +102,15 @@ while not board.is_game_over():
                     print(f"Opening line deviated from {opening_name}, switching to search.")
                 if SEARCH_VERBOSE and opening_name and book_status == "line_complete":
                     print(f"Opening line complete for {opening_name}, switching to search.")
-                comp_move = search.search(board, verbose=SEARCH_VERBOSE)
+                if MOVE_TIME_SECONDS is not None:
+                    comp_move = search.search(
+                        board,
+                        verbose=SEARCH_VERBOSE,
+                        depth=MAX_ITERATIVE_DEPTH,
+                        max_time=MOVE_TIME_SECONDS,
+                    )
+                else:
+                    comp_move = search.search(board, verbose=SEARCH_VERBOSE)
 
             end_time = time.perf_counter() - start_time
             print(f"{name} plays: {comp_move}")
