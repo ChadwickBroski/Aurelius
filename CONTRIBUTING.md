@@ -15,7 +15,7 @@ When creating an issue, please include:
 
 * **For bugs:** A clear description of the problem, steps to reproduce it, and the expected versus actual behavior.
 * **For ideas/features:** A detailed description of the proposed enhancement and why it would be useful.
-* **For engine improvements:** Any benchmarks, test positions, or reasoning that support the change.
+* **For engine improvements:** Any benchmarks, test positions, or reasoning that support the change, like +100ELO or +100NPS.
 
 (No pressure.)
 
