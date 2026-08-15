@@ -7,6 +7,7 @@ A free, open source, Python-based chess engine with advanced search algorithms, 
 
 Version `0.2.1`
 ELO `~1450`
+`2000`NPS
 
 </div>
 
