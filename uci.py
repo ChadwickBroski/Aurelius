@@ -1,5 +1,6 @@
 import sys
 import os
+import threading
 import chess
 
 import search
@@ -11,10 +12,10 @@ ENGINE_AUTHOR = "ChadwickBroski [GITHUB]"
 OPENING_BOOK_PATH = os.path.join(os.path.dirname(__file__), "openings", "openings.json")
 
 # Depth cap passed to search.search() when we're in iterative-deepening
-# mode (movetime/wtime/btime). It's not really a target - max_time is
-# what actually limits the search - it just stops ID from looping forever
-# in the (very unlikely) case a time budget is huge and positions are
-# simple enough to hit very deep iterations quickly.
+# mode (movetime/wtime/btime, or pondering). It's not really a target -
+# max_time is what actually limits the search - it just stops ID from
+# looping forever in the (very unlikely) case a time budget is huge and
+# positions are simple enough to hit very deep iterations quickly.
 MAX_ITERATIVE_DEPTH = 99
 
 
@@ -77,10 +78,13 @@ def parse_go(command: str, board: chess.Board) -> dict:
       go movetime 1000        -> iterative deepening, ~1000ms budget
       go wtime .. btime ..    -> iterative deepening, budget computed from
                                   the side-to-move's remaining clock
+      go ponder ...           -> the "ponder" token itself is ignored here;
+                                  the rest of the params (movetime/wtime/
+                                  depth) parse the same as a normal go.
+                                  Whether this is a ponder search is
+                                  detected separately in main() by
+                                  checking for the "ponder" token.
       (anything else/no args) -> fixed depth at the engine default
-
-    Note: 'go infinite' isn't specially handled - it falls through to the
-    same default as a bare 'go', same as before this change.
     """
     parts = command.split()
 
@@ -153,6 +157,26 @@ def main():
     search_depth = search.DEPTH
     opening_book = OpeningBook(OPENING_BOOK_PATH, enabled=True)
 
+    # Pondering state. Only ONE search (ponder or real) ever actually
+    # runs at a time - the thread exists to keep stdin responsive while
+    # a ponder search is in progress, not to run two searches in
+    # parallel. Every path that could start a new search joins any
+    # existing ponder thread first, so the shared search state
+    # (transposition_table, killer_moves, nodes_evaluated, etc. in
+    # search.py) is never touched by two threads simultaneously.
+    ponder_thread = None
+    ponder_result = {"move": None}
+
+    def join_ponder_if_active():
+        """Wait for any in-progress ponder search to finish, discarding
+        its result without printing bestmove. Used defensively when a
+        new position/go arrives without a prior ponderhit/stop - not
+        expected in normal GUI behavior, but safe to handle anyway."""
+        nonlocal ponder_thread
+        if ponder_thread is not None:
+            ponder_thread.join()
+            ponder_thread = None
+
     while True:
         line = sys.stdin.readline()
         if not line:
@@ -166,6 +190,7 @@ def main():
         if command == "uci":
             print(f"id name {ENGINE_NAME}")
             print(f"id author {ENGINE_AUTHOR}")
+            print("option name Ponder type check default true")
             print("uciok")
             sys.stdout.flush()
 
@@ -174,6 +199,7 @@ def main():
             sys.stdout.flush()
 
         elif command == "ucinewgame":
+            join_ponder_if_active()
             board = chess.Board()
             search.transposition_table.clear()
             search.killer_moves.clear()
@@ -181,31 +207,73 @@ def main():
             sys.stdout.flush()
 
         elif command.startswith("setoption"):
-            # Ignore unknown options for now.
+            # Ignore unknown options for now (including the Ponder
+            # checkbox itself - whether pondering happens is controlled
+            # by whether the GUI actually sends "go ponder", not by a
+            # local flag here).
             sys.stdout.flush()
 
         elif command.startswith("position"):
+            join_ponder_if_active()
             board = parse_position(command, board)
             sys.stdout.flush()
 
         elif command.startswith("go"):
+            join_ponder_if_active()
+
+            is_ponder = "ponder" in command.split()
             go_params = parse_go(command, board)
             depth = go_params["depth"]
             max_time = go_params["max_time"]
             if depth is None:
                 depth = search_depth
 
-            best_move = choose_move(board, depth, max_time, opening_book)
+            if is_ponder:
+                # Search this position (the one the GUI predicts the
+                # opponent will reach) in the background, using our own
+                # copy so a "position" command arriving mid-ponder can't
+                # race with it. Deliberately do NOT print bestmove yet -
+                # per the UCI ponder protocol, that only happens once
+                # "ponderhit" or "stop" arrives.
+                ponder_board_snapshot = board.copy(stack=False)
+                ponder_result["move"] = None
 
-            if best_move is None:
-                print("bestmove 0000")
+                def _run_ponder(snapshot=ponder_board_snapshot):
+                    ponder_result["move"] = choose_move(snapshot, depth, max_time, opening_book)
+
+                ponder_thread = threading.Thread(target=_run_ponder, daemon=True)
+                ponder_thread.start()
             else:
-                print(f"bestmove {best_move.uci()}")
-            sys.stdout.flush()
+                best_move = choose_move(board, depth, max_time, opening_book)
+                if best_move is None:
+                    print("bestmove 0000")
+                else:
+                    print(f"bestmove {best_move.uci()}")
+                sys.stdout.flush()
 
-        elif command == "stop":
-            # This simple engine searches synchronously, so stop is a no-op.
-            sys.stdout.flush()
+        elif command in ("ponderhit", "stop"):
+            if ponder_thread is not None:
+                # Whether this is a genuine ponderhit (guess was right)
+                # or a ponder-miss delivered as "stop", the correct UCI
+                # response is the same: wait for the ponder search to
+                # finish and report its bestmove. On a miss, the GUI
+                # discards this and sends a fresh position/go for what
+                # actually happened - that's expected, not an error.
+                ponder_thread.join()
+                ponder_thread = None
+                move = ponder_result["move"]
+                if move is None:
+                    print("bestmove 0000")
+                else:
+                    print(f"bestmove {move.uci()}")
+                sys.stdout.flush()
+            elif command == "stop":
+                # No ponder in progress. A normal synchronous "go" can't
+                # be interrupted mid-search with this engine's current
+                # architecture (minimax has no time-check hook threaded
+                # through its recursion) - this remains a no-op, same as
+                # before pondering was added.
+                sys.stdout.flush()
 
         elif command == "quit":
             break

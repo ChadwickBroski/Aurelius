@@ -22,6 +22,15 @@ PREDICT_REPLY_DEPTH = search.DEPTH
 MOVE_TIME_SECONDS = 5.0
 MAX_ITERATIVE_DEPTH = 99
 
+# Pondering: after playing our move, guess the human's likely reply and
+# spend this many seconds analyzing that position before waiting for
+# their actual input - results get cached in the shared transposition
+# table, so if they play the guessed move, the next search starts from
+# a head start instead of cold. Set to None to disable.
+PONDER_ENABLED = True
+PONDER_TIME_SECONDS = 3.0
+PONDER_GUESS_DEPTH = 2
+
 ENGINE_COLOR = chess.WHITE
 OPENING_BOOK_PATH = os.path.join(os.path.dirname(__file__), "openings", "openings.json")
 
@@ -123,6 +132,21 @@ while not board.is_game_over():
                     print("Debug predicted reply: none")
             print(f"Move evaluated in {end_time} seconds.")
             print(board)
+
+            if PONDER_ENABLED and not board.is_game_over():
+                ponder_start = time.perf_counter()
+                guessed_reply = search.ponder(
+                    board,
+                    guess_depth=PONDER_GUESS_DEPTH,
+                    ponder_time=PONDER_TIME_SECONDS,
+                    verbose=False,
+                )
+                ponder_elapsed = time.perf_counter() - ponder_start
+                if guessed_reply is not None and SEARCH_VERBOSE:
+                    print(
+                        f"(Pondered {board.san(guessed_reply)} for {ponder_elapsed:.1f}s "
+                        f"while waiting for your move.)"
+                    )
         except Exception as e:
             print(f"Engine error: {e}")
             terminated_early = True

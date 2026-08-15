@@ -16,6 +16,11 @@ ELO `~1450`
 - **UCI-Compatible Chess**: Built on the `python-chess` library for full legal move validation and chess rule support
 - **Minimax Search with Alpha-Beta Pruning**: Efficient game tree exploration with alpha-beta pruning for optimal move selection
 - **Iterative Deepening**: Searches depth 1, then 2, then 3, and so on, using each shallow iteration's best move to improve move ordering for the next - stopping once a time budget runs out or a maximum depth is reached. Falls back to a plain fixed-depth search when no time budget is given (adjustable via the `DEPTH` constant in `search.py`, default 4 plies)
+- **Pondering**: Uses idle time between moves to think ahead
+  - After playing a move, guesses the opponent's most likely reply and searches that position immediately, storing results in the shared transposition table
+  - If the guess is right, the next real search starts with cached analysis already in place instead of starting cold
+  - `play.py`: pondering runs synchronously in the gap before prompting for your move (configurable via `PONDER_ENABLED`/`PONDER_TIME_SECONDS`)
+  - `uci.py`: full UCI ponder protocol support (`go ponder` / `ponderhit` / `stop`) via a background thread, so the engine stays responsive to GUI commands while pondering - only one search ever runs at a time, the thread just keeps stdin from blocking
 
 > Note: Aurelius is a command line program. You may want to use it in your own chess GUI.
 > It is confirmed that CuteChess is compatible.

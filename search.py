@@ -515,6 +515,38 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
     max_depth = max(1, depth)
     best_move = None
     best_score = None
+    if max_time is None:
+        # Fixed-depth mode: exactly one search, directly at the requested
+        # depth - no iteration. (Previously this incorrectly looped
+        # starting from depth 1 and broke after that first iteration,
+        # meaning fixed-depth mode always searched depth 1 regardless of
+        # what depth was actually requested - that's fixed here.)
+        nodes_evaluated = 0
+        tt_hits = 0
+        null_move_cutoffs = 0
+        lmr_reductions = 0
+
+        depth_start = time.perf_counter()
+        best_move, best_score, forced_mate = search_fixed_depth(
+            board, max_depth, use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose
+        )
+        depth_elapsed = time.perf_counter() - depth_start
+        total_elapsed = time.perf_counter() - start_time
+
+        if uci_output and best_move is not None:
+            nps = int(nodes_evaluated / depth_elapsed) if depth_elapsed > 0.001 else 0
+            cp = int(max(-100000, min(100000, best_score)))
+            pv = best_move.uci()
+            print(f"info depth {max_depth} score cp {cp} nodes {nodes_evaluated} nps {nps} time {int(total_elapsed * 1000)} pv {pv}")
+            sys.stdout.flush()
+
+        if verbose:
+            print(f"Board evaluation: {eval.evaluate(board)}")
+
+        return best_move
+
+    # Iterative deepening mode: search depth 1, 2, 3, ... until the time
+    # budget runs out or max_depth is reached.
     current_depth = 1
 
     while current_depth <= max_depth:
@@ -553,10 +585,6 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
         if forced_mate:
             break
 
-        if max_time is None:
-            # Fixed-depth mode: only ever run the one requested depth.
-            break
-
         remaining_time = max_time - total_elapsed
         projected_next_depth_time = depth_elapsed * ID_NEXT_DEPTH_TIME_MULTIPLIER
 
@@ -569,6 +597,101 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
         print(f"Board evaluation: {eval.evaluate(board)}")
 
     return best_move
+
+
+def ponder(board, guess_depth=2, ponder_depth=None, ponder_time=None, use_null=False, use_lmr=True, verbose=False):
+    """
+    Use idle time - after we've played our move, while waiting for the
+    opponent's actual move - to guess their most likely reply and search
+    that resulting position now, with the transposition table ENABLED.
+
+    This is different from predict_reply(), which deliberately runs with
+    use_tt=False and restores killer_moves afterward, since it exists
+    purely to print a debug guess without touching shared search state.
+    ponder() does the opposite on purpose: it WANTS the transposition
+    table and killer_moves to end up populated with real analysis of the
+    guessed position, so that if the opponent actually plays that move,
+    the next real search finds cached entries already sitting there
+    (at whatever depth this pondering reached) instead of starting cold.
+    That's what makes the following search faster/deeper for the same
+    time budget as the game goes on.
+
+    If the opponent plays something other than the guessed move, this
+    was wasted work - normal, expected tradeoff with pondering in any
+    engine, not a bug. Positions that never actually occur just sit
+    unused in the transposition table until they're naturally evicted.
+
+    guess_depth: how deep to search just to pick a plausible reply -
+                 shallow and fast, it only needs a decent guess, not the
+                 strongest possible move (deeper guessing eats into the
+                 time actually spent analyzing the guessed position).
+    ponder_depth / ponder_time: how much of the idle-time budget to
+                 spend analyzing the guessed position - same semantics
+                 as search()'s depth/max_time. If ponder_time is given
+                 and ponder_depth isn't, defaults to a high cap (99) so
+                 max_time is what actually limits it, matching how
+                 iterative deepening is used elsewhere in this file.
+
+    Returns the guessed move (useful for logging/verbose output), or
+    None if the position is already game-over. Does not modify `board`.
+    Restores nodes_evaluated/tt_hits/null_move_cutoffs/lmr_reductions
+    afterward, so this speculative work doesn't get mixed into the
+    stats for the real move that was just played and printed.
+    """
+    global nodes_evaluated, tt_hits, null_move_cutoffs, lmr_reductions
+
+    if board.is_game_over():
+        return None
+
+    saved_nodes_evaluated = nodes_evaluated
+    saved_tt_hits = tt_hits
+    saved_null_move_cutoffs = null_move_cutoffs
+    saved_lmr_reductions = lmr_reductions
+
+    try:
+        ponder_board = board.copy(stack=False)
+
+        # Quick, shallow search just to guess a plausible reply.
+        guessed_move = search(
+            ponder_board,
+            use_tt=True,
+            use_null=use_null,
+            use_lmr=use_lmr,
+            depth=guess_depth,
+            verbose=False,
+        )
+
+        if guessed_move is None:
+            return None
+
+        ponder_board.push(guessed_move)
+
+        if ponder_board.is_game_over():
+            return guessed_move
+
+        effective_depth = ponder_depth
+        if effective_depth is None:
+            effective_depth = 99 if ponder_time is not None else DEPTH
+
+        # The real work: analyze the guessed position and let its
+        # results land in the shared transposition_table (use_tt=True,
+        # not restored in `finally` below - that's the whole point).
+        search(
+            ponder_board,
+            use_tt=True,
+            use_null=use_null,
+            use_lmr=use_lmr,
+            depth=effective_depth,
+            max_time=ponder_time,
+            verbose=verbose,
+        )
+
+        return guessed_move
+    finally:
+        nodes_evaluated = saved_nodes_evaluated
+        tt_hits = saved_tt_hits
+        null_move_cutoffs = saved_null_move_cutoffs
+        lmr_reductions = saved_lmr_reductions
 
 
 def predict_reply(board, depth=DEPTH, use_null=False, use_lmr=True, verbose=False):
