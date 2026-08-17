@@ -70,6 +70,10 @@ NPS `~2000`
   - Black attacks on White pieces reduce score by 1/7 of the attacked piece's value
   - White attacks on Black pieces increase score by 1/7 of the attacked piece's value
   - Similar defense bonuses for protecting own pieces
+- **Connected Rooks Bonus**:
+  - Rewards two rooks occupying the same open file, where neither side has a pawn on that file
+  - Represents the increased pressure and coordination created by doubled rooks on an open file
+  - Grants a +5 bonus for White and a −5 penalty for Black
 - **Special Cases**:
   - Draw and checkmate detection run first, before any of the above - if the game is already decided, the rest of the evaluation is skipped entirely rather than computed and discarded
   - Immediate detection of checkmate (±10,000,000) and drawn positions (stalemate, insufficient material, threefold repetition, fifty-move rule)

@@ -328,6 +328,21 @@ def evaluate(board):
     if len(board.pieces(chess.BISHOP, chess.BLACK)) >= 2:
         score -= BISHOP_PAIR_BONUS
 
+    # Connected rooks: two rooks on the same open file (no pawns of either
+    # color on it) support each other and double the pressure down that
+    # file - the same "connected" idea that worked for passed pawns,
+    # applied to rooks. Purely structural - doesn't require either rook to
+    # move anywhere, just checks whatever files they're already on.
+    white_rook_files = [square % 8 for square in board.pieces(chess.ROOK, chess.WHITE)]
+    for f in set(white_rook_files):
+        if white_rook_files.count(f) >= 2 and white_pawn_files[f] == 0 and black_pawn_files[f] == 0:
+            score += 5
+
+    black_rook_files = [square % 8 for square in board.pieces(chess.ROOK, chess.BLACK)]
+    for f in set(black_rook_files):
+        if black_rook_files.count(f) >= 2 and white_pawn_files[f] == 0 and black_pawn_files[f] == 0:
+            score -= 5
+
     # Add piece-square table bonuses for each piece type, scaled by the pst_weight
     # Add knight positional bonus
     for square in board.pieces(chess.KNIGHT, chess.WHITE):
