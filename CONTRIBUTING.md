@@ -6,6 +6,8 @@
 Thank you for your interest in contributing to Aurelius!
 
 Aurelius is an evaluation-based chess engine, and contributions of all sizes are welcome. Whether you're fixing a bug, improving the evaluation function, optimizing performance, or suggesting new ideas, your help is appreciated.
+</div>
+
 
 ## Have a Bug, Idea, or Improvement?
 
