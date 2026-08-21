@@ -42,6 +42,20 @@ EVAL_CHECKMATE_SCORE = 10000000
 # can't interrupt a search that's already in progress (see search()).
 ID_NEXT_DEPTH_TIME_MULTIPLIER = 5
 
+# Aspiration windows: instead of searching each iterative-deepening depth
+# with the full (-inf, inf) window, start narrow around the previous
+# depth's score and only widen if the real score falls outside it. A
+# tighter window prunes harder, since alpha-beta cutoffs happen sooner
+# when the window is small. The guess is usually right (scores don't
+# swing wildly between adjacent depths in most positions), so most
+# iterations only need one pass; a wrong guess costs an extra re-search
+# at the same depth with a wider window, which is still cheaper than
+# always searching the full range from scratch.
+ASPIRATION_INITIAL_WINDOW = 25   # in eval units (pawn=10, so ~2.5 pawns)
+ASPIRATION_MAX_WIDENINGS = 4     # after this many failed widenings, fall
+                                  # back to a full (-inf, inf) search rather
+                                  # than widening forever
+
 
 def board_key(board):
     # python-chess exposes a private but fast transposition key.
@@ -143,9 +157,12 @@ def order_inner_moves(board, depth, tt_move=None):
     tactical.sort(key=lambda item: item[0], reverse=True)
 
     killer = killer_moves.get(depth)
+    killer_first = []
     if killer in quiet:
         quiet.remove(killer)
-        quiet.insert(0, killer)
+        killer_first = [killer]
+
+    quiet = killer_first + quiet
 
     ordered = [move for _, move in tactical] + quiet
 
@@ -408,9 +425,17 @@ def minimax(
     return node_score
 
 
-def search_fixed_depth(board, search_depth, use_tt=True, use_null=False, use_lmr=True, verbose=False):
+def search_fixed_depth(board, search_depth, alpha=float("-inf"), beta=float("inf"),
+                        use_tt=True, use_null=False, use_lmr=True, verbose=False):
     """Run a single fixed-depth root search (the original search() body,
     factored out so iterative deepening can call it once per depth).
+
+    alpha/beta default to the full (-inf, inf) window - callers that want
+    an aspiration window pass a narrower one in. If a root move's score
+    ends up <= alpha or >= beta, that means the true score wasn't pinned
+    down (it hit the window boundary) - the caller (search()) is
+    responsible for detecting that and re-searching with a wider window;
+    this function doesn't widen anything itself.
 
     Returns (best_move, best_score, forced_mate_found).
     """
@@ -439,8 +464,8 @@ def search_fixed_depth(board, search_depth, use_tt=True, use_null=False, use_lmr
         score = minimax(
             board,
             search_depth - 1,
-            float("-inf"),
-            float("inf"),
+            alpha,
+            beta,
             board.turn == chess.WHITE,
             use_tt=use_tt,
             use_null=use_null,
@@ -474,20 +499,90 @@ def search_fixed_depth(board, search_depth, use_tt=True, use_null=False, use_lmr
     return best_move, best_score, False
 
 
-def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, verbose=False, depth=DEPTH, uci_output=False, max_time=None):
+def _search_at_depth_with_aspiration(board, current_depth, previous_score, use_aspiration,
+                                      use_tt, use_null, use_lmr, verbose, deadline=None):
+    """Run search_fixed_depth at one depth, applying an aspiration window
+    around previous_score when enabled, widening and re-searching (still
+    at the SAME depth) if the result hits the window boundary. Falls back
+    to a full (-inf, inf) window after ASPIRATION_MAX_WIDENINGS failed
+    attempts, or immediately when there's no previous score to aim at
+    (first iteration) or aspiration is disabled.
+
+    deadline: absolute time.perf_counter() value (start_time + max_time)
+    from the caller's overall time budget. If given, and time runs out
+    partway through widening attempts, stops widening and falls back to
+    one full-window search immediately - a failed narrow window doesn't
+    prove anything about how expensive the real search will be, so this
+    doesn't try to guess; it just gets a real answer without burning
+    additional time on more narrow guesses first. Without this check,
+    a position where the score swings a lot between depths (common in
+    tactical middlegame positions) can burn through several near-full
+    re-searches with no awareness of the time budget at all - that's
+    the actual mechanism behind aspiration windows sometimes using
+    MORE time than expected, not an inherent property of the technique.
+
+    Returns (best_move, best_score, forced_mate_found) - same shape as
+    search_fixed_depth, so callers don't need to know whether aspiration
+    was actually used.
+    """
+    if not use_aspiration or previous_score is None:
+        return search_fixed_depth(
+            board, current_depth,
+            use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose,
+        )
+
+    window = ASPIRATION_INITIAL_WINDOW
+    alpha = previous_score - window
+    beta = previous_score + window
+
+    for _ in range(ASPIRATION_MAX_WIDENINGS):
+        if deadline is not None and time.perf_counter() >= deadline:
+            break
+
+        move, score, forced_mate = search_fixed_depth(
+            board, current_depth, alpha=alpha, beta=beta,
+            use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose,
+        )
+
+        if forced_mate or (score > alpha and score < beta):
+            return move, score, forced_mate
+
+        # Fail-low or fail-high: the real score is outside our guessed
+        # window. Widen and try again at the SAME depth (not a wasted
+        # depth - just a wider net this time).
+        window *= 2
+        if score <= alpha:
+            alpha = previous_score - window
+        if score >= beta:
+            beta = previous_score + window
+
+    # Ran out of widening attempts (or time) - fall back to a full
+    # window so we're guaranteed a real answer rather than looping
+    # forever or returning a bound instead of an exact score.
+    return search_fixed_depth(
+        board, current_depth,
+        use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose,
+    )
+
+
+def search(board, use_tt=True, use_null=False, use_lmr=True, use_aspiration=True,
+           reset_tt=False, verbose=False, depth=DEPTH, uci_output=False, max_time=None):
     """
     Two modes, controlled by max_time:
 
-    - max_time=None (default): exactly the original behavior - a single
-      fixed-depth search at `depth`. Nothing about this path changed;
-      existing callers (like predict_reply) are unaffected.
+    - max_time=None (default): a single fixed-depth search at `depth`.
+      Aspiration windows don't apply here (there's no previous iteration
+      to aim at), so this path is unaffected by use_aspiration.
 
     - max_time=<seconds>: iterative deepening. Searches depth 1, then 2,
       then 3, ... printing a UCI "info depth ..." line after each one
       completes, using each depth's best move to seed move ordering for
       the next (via the transposition table) and stopping once there's
       no longer time for another full iteration, or `depth` is reached.
-      Returns the best move from the deepest iteration that finished.
+      When use_aspiration is True, depths after the first are searched
+      with a narrow window around the previous depth's score instead of
+      the full range, widening and re-searching (same depth) if the
+      guess was wrong.
 
     Note: this can't interrupt a search that's already in progress -
     minimax has no time-check hook threaded through its recursion, so if
@@ -515,12 +610,10 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
     max_depth = max(1, depth)
     best_move = None
     best_score = None
+
     if max_time is None:
         # Fixed-depth mode: exactly one search, directly at the requested
-        # depth - no iteration. (Previously this incorrectly looped
-        # starting from depth 1 and broke after that first iteration,
-        # meaning fixed-depth mode always searched depth 1 regardless of
-        # what depth was actually requested - that's fixed here.)
+        # depth - no iteration, no aspiration window (nothing to aim at).
         nodes_evaluated = 0
         tt_hits = 0
         null_move_cutoffs = 0
@@ -548,6 +641,7 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
     # Iterative deepening mode: search depth 1, 2, 3, ... until the time
     # budget runs out or max_depth is reached.
     current_depth = 1
+    previous_score = None
 
     while current_depth <= max_depth:
         nodes_evaluated = 0
@@ -556,8 +650,10 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
         lmr_reductions = 0
 
         depth_start = time.perf_counter()
-        move, score, forced_mate = search_fixed_depth(
-            board, current_depth, use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose
+        deadline = (start_time + max_time) if max_time is not None else None
+        move, score, forced_mate = _search_at_depth_with_aspiration(
+            board, current_depth, previous_score, use_aspiration,
+            use_tt, use_null, use_lmr, verbose, deadline=deadline,
         )
         depth_elapsed = time.perf_counter() - depth_start
         total_elapsed = time.perf_counter() - start_time
@@ -565,6 +661,7 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
         if move is not None:
             best_move = move
             best_score = score
+            previous_score = score
 
         if uci_output and best_move is not None:
             nps = int(nodes_evaluated / depth_elapsed) if depth_elapsed > 0.001 else 0

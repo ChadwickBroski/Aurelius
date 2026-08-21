@@ -47,6 +47,10 @@ NPS `~2000`
   - `play.py`: pondering runs synchronously in the gap before prompting for your move (configurable via `PONDER_ENABLED`/`PONDER_TIME_SECONDS`)
   - `uci.py`: full UCI ponder protocol support (`go ponder` / `ponderhit` / `stop`) via a background thread, so the engine stays responsive to GUI commands while pondering - only one search ever runs at a time, the thread just keeps stdin from blocking
 
+- **Aspiration windows**: Narrows each iterative-deepening depth's search window around the previous depth's score instead of always searching the full range, widening and re-searching if the guess is wrong
+  - ~17% fewer nodes for the same result in quiet/stable positions
+  - Trade-off: can cost extra nodes in volatile middlegame positions where the score swings between depths, since failed narrow-window attempts add re-search overhead
+  - Time-budget aware: widening attempts stop early once the move's time budget runs out, falling back to a single full-window search instead of continuing to gamble on more narrow attempts
 
 ### Move Ordering
 - **Root Moves**: Prioritized by promotions (800+ bonus), captures (1000 + MVV-LVA), and checks (150 bonus)
