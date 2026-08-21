@@ -42,14 +42,6 @@ EVAL_CHECKMATE_SCORE = 10000000
 # can't interrupt a search that's already in progress (see search()).
 ID_NEXT_DEPTH_TIME_MULTIPLIER = 5
 
-# Aspiration windows for iterative deepening. Scores are in pawn units,
-# so a 0.50 window means we first search only half a pawn above/below the
-# previous iteration's result, then widen if that guess was too optimistic
-# or pessimistic.
-ASPIRATION_WINDOW_INITIAL = 0.50
-ASPIRATION_WINDOW_GROWTH = 2.0
-ASPIRATION_WINDOW_MAX = 8.0
-
 
 def board_key(board):
     # python-chess exposes a private but fast transposition key.
@@ -416,16 +408,7 @@ def minimax(
     return node_score
 
 
-def search_fixed_depth(
-    board,
-    search_depth,
-    use_tt=True,
-    use_null=False,
-    use_lmr=True,
-    verbose=False,
-    alpha=float("-inf"),
-    beta=float("inf"),
-):
+def search_fixed_depth(board, search_depth, use_tt=True, use_null=False, use_lmr=True, verbose=False):
     """Run a single fixed-depth root search (the original search() body,
     factored out so iterative deepening can call it once per depth).
 
@@ -456,8 +439,8 @@ def search_fixed_depth(
         score = minimax(
             board,
             search_depth - 1,
-            alpha,
-            beta,
+            float("-inf"),
+            float("inf"),
             board.turn == chess.WHITE,
             use_tt=use_tt,
             use_null=use_null,
@@ -489,46 +472,6 @@ def search_fixed_depth(
                 best_move = move
 
     return best_move, best_score, False
-
-
-def search_depth_with_aspiration(board, search_depth, previous_score, use_tt=True, use_null=False, use_lmr=True, verbose=False):
-    """Run one depth with a narrow window around `previous_score`.
-
-    If the search fails low or high, widen the window and retry until it
-    fits or the window becomes effectively full.
-    """
-    if previous_score is None:
-        return search_fixed_depth(board, search_depth, use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose)
-
-    window = ASPIRATION_WINDOW_INITIAL
-
-    while True:
-        alpha = previous_score - window
-        beta = previous_score + window
-
-        move, score, forced_mate = search_fixed_depth(
-            board,
-            search_depth,
-            use_tt=use_tt,
-            use_null=use_null,
-            use_lmr=use_lmr,
-            verbose=verbose,
-            alpha=alpha,
-            beta=beta,
-        )
-
-        if forced_mate:
-            return move, score, True
-
-        if score <= alpha:
-            window = min(ASPIRATION_WINDOW_MAX, window * ASPIRATION_WINDOW_GROWTH)
-            continue
-
-        if score >= beta:
-            window = min(ASPIRATION_WINDOW_MAX, window * ASPIRATION_WINDOW_GROWTH)
-            continue
-
-        return move, score, False
 
 
 def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, verbose=False, depth=DEPTH, uci_output=False, max_time=None):
@@ -572,7 +515,6 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
     max_depth = max(1, depth)
     best_move = None
     best_score = None
-    previous_score = None
     if max_time is None:
         # Fixed-depth mode: exactly one search, directly at the requested
         # depth - no iteration. (Previously this incorrectly looped
@@ -614,14 +556,8 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
         lmr_reductions = 0
 
         depth_start = time.perf_counter()
-        move, score, forced_mate = search_depth_with_aspiration(
-            board,
-            current_depth,
-            previous_score,
-            use_tt=use_tt,
-            use_null=use_null,
-            use_lmr=use_lmr,
-            verbose=verbose,
+        move, score, forced_mate = search_fixed_depth(
+            board, current_depth, use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose
         )
         depth_elapsed = time.perf_counter() - depth_start
         total_elapsed = time.perf_counter() - start_time
@@ -629,7 +565,6 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, reset_tt=False, ver
         if move is not None:
             best_move = move
             best_score = score
-            previous_score = score
 
         if uci_output and best_move is not None:
             nps = int(nodes_evaluated / depth_elapsed) if depth_elapsed > 0.001 else 0
