@@ -7,7 +7,7 @@ import time
 from chess import IllegalMoveError, InvalidMoveError, AmbiguousMoveError
 from opening_book import OpeningBook
 
-version = "0.2.1"
+version = "0.2.2"
 name = "Aurelius"
 SEARCH_VERBOSE = True
 USE_OPENING_BOOK = True

@@ -19,8 +19,6 @@ When creating an issue, please include:
 * **For ideas/features:** A detailed description of the proposed enhancement and why it would be useful.
 * **For engine improvements:** Any benchmarks, test positions, or reasoning that support the change, like +100ELO or +100NPS.
 
-(No pressure.)
-
 ## Types of Contributions
 
 Contributions can include, but are not limited to:
