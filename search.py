@@ -3,6 +3,8 @@ import eval
 import syzygy
 import sys
 import time
+import os
+from concurrent.futures import ProcessPoolExecutor
 
 DEPTH = 4
 nodes_evaluated = 0
@@ -55,6 +57,17 @@ ASPIRATION_INITIAL_WINDOW = 25   # in eval units (pawn=10, so ~2.5 pawns)
 ASPIRATION_MAX_WIDENINGS = 4     # after this many failed widenings, fall
                                   # back to a full (-inf, inf) search rather
                                   # than widening forever
+
+ROOT_PARALLEL_MIN_DEPTH = 4
+ROOT_PARALLEL_MIN_MOVES = 4
+
+
+def _reset_search_counters():
+    global nodes_evaluated, tt_hits, null_move_cutoffs, lmr_reductions
+    nodes_evaluated = 0
+    tt_hits = 0
+    null_move_cutoffs = 0
+    lmr_reductions = 0
 
 
 def board_key(board):
@@ -171,6 +184,62 @@ def order_inner_moves(board, depth, tt_move=None):
         ordered.insert(0, tt_move)
 
     return ordered
+
+
+def _evaluate_root_move(board, move, search_depth, alpha, beta, use_tt=True,
+                        use_null=False, use_lmr=True):
+    root_turn = board.turn
+    board.push(move)
+    try:
+        if board.is_checkmate():
+            score = ROOT_CHECKMATE_SCORE if root_turn == chess.WHITE else -ROOT_CHECKMATE_SCORE
+            return move, score, True
+
+        score = minimax(
+            board,
+            search_depth - 1,
+            alpha,
+            beta,
+            board.turn == chess.WHITE,
+            use_tt=use_tt,
+            use_null=use_null,
+            use_lmr=use_lmr,
+            allow_null=True,
+        )
+        return move, score, False
+    finally:
+        board.pop()
+
+
+def _search_root_move_worker(args):
+    board, move_uci, search_depth, alpha, beta, use_tt, use_null, use_lmr = args
+
+    _reset_search_counters()
+    killer_moves.clear()
+    if use_tt:
+        transposition_table.clear()
+
+    move = chess.Move.from_uci(move_uci)
+    move, score, forced_mate = _evaluate_root_move(
+        board,
+        move,
+        search_depth,
+        alpha,
+        beta,
+        use_tt=use_tt,
+        use_null=use_null,
+        use_lmr=use_lmr,
+    )
+
+    return (
+        move.uci(),
+        score,
+        forced_mate,
+        nodes_evaluated,
+        tt_hits,
+        null_move_cutoffs,
+        lmr_reductions,
+    )
 
 
 def minimax(
@@ -426,7 +495,8 @@ def minimax(
 
 
 def search_fixed_depth(board, search_depth, alpha=float("-inf"), beta=float("inf"),
-                        use_tt=True, use_null=False, use_lmr=True, verbose=False):
+                        use_tt=True, use_null=False, use_lmr=True, verbose=False,
+                        executor=None):
     """Run a single fixed-depth root search (the original search() body,
     factored out so iterative deepening can call it once per depth).
 
@@ -439,6 +509,7 @@ def search_fixed_depth(board, search_depth, alpha=float("-inf"), beta=float("inf
 
     Returns (best_move, best_score, forced_mate_found).
     """
+    global nodes_evaluated, tt_hits, null_move_cutoffs, lmr_reductions
     root_turn = board.turn
 
     tt_move = None
@@ -451,33 +522,73 @@ def search_fixed_depth(board, search_depth, alpha=float("-inf"), beta=float("inf
     best_move = None
     best_score = float("-inf") if root_turn == chess.WHITE else float("inf")
 
-    for move in legal_moves:
-        board.push(move)
-        if board.is_checkmate():
-            board.pop()
-            score = ROOT_CHECKMATE_SCORE if root_turn == chess.WHITE else -ROOT_CHECKMATE_SCORE
-            if verbose:
-                print(f"Move: {move}, Score: {score}")
-                print(f"Immediate checkmate found. Playing: {move}")
-            return move, score, True
+    use_parallel = (
+        executor is not None
+        and not verbose
+        and search_depth >= ROOT_PARALLEL_MIN_DEPTH
+        and len(legal_moves) >= ROOT_PARALLEL_MIN_MOVES
+    )
 
-        score = minimax(
+    if use_parallel:
+        worker_args = [
+            (
+                board,
+                move.uci(),
+                search_depth,
+                alpha,
+                beta,
+                use_tt,
+                use_null,
+                use_lmr,
+            )
+            for move in legal_moves
+        ]
+
+        results = list(executor.map(_search_root_move_worker, worker_args, chunksize=1))
+
+        _reset_search_counters()
+        for move, result in zip(legal_moves, results):
+            _, score, forced_mate, node_count, tt_count, null_count, lmr_count = result
+            nodes_evaluated += node_count
+            tt_hits += tt_count
+            null_move_cutoffs += null_count
+            lmr_reductions += lmr_count
+
+            if forced_mate:
+                return move, score, True
+
+            if root_turn == chess.WHITE:
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+            else:
+                if score < best_score:
+                    best_score = score
+                    best_move = move
+
+        return best_move, best_score, False
+
+    for move in legal_moves:
+        _, score, forced_mate = _evaluate_root_move(
             board,
-            search_depth - 1,
+            move,
+            search_depth,
             alpha,
             beta,
-            board.turn == chess.WHITE,
             use_tt=use_tt,
             use_null=use_null,
             use_lmr=use_lmr,
-            allow_null=True,
         )
-        board.pop()
 
         if verbose:
             print(f"Move: {move}, Score: {score}")
 
         # If search already found a forced mate, no need to inspect other root moves.
+        if forced_mate:
+            if verbose:
+                print(f"Immediate checkmate found. Playing: {move}")
+            return move, score, True
+
         if root_turn == chess.WHITE and score >= EVAL_CHECKMATE_SCORE:
             if verbose:
                 print(f"Forced checkmate found. Playing: {move}")
@@ -500,7 +611,8 @@ def search_fixed_depth(board, search_depth, alpha=float("-inf"), beta=float("inf
 
 
 def _search_at_depth_with_aspiration(board, current_depth, previous_score, use_aspiration,
-                                      use_tt, use_null, use_lmr, verbose, deadline=None):
+                                      use_tt, use_null, use_lmr, verbose, deadline=None,
+                                      executor=None):
     """Run search_fixed_depth at one depth, applying an aspiration window
     around previous_score when enabled, widening and re-searching (still
     at the SAME depth) if the result hits the window boundary. Falls back
@@ -529,6 +641,7 @@ def _search_at_depth_with_aspiration(board, current_depth, previous_score, use_a
         return search_fixed_depth(
             board, current_depth,
             use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose,
+            executor=executor,
         )
 
     window = ASPIRATION_INITIAL_WINDOW
@@ -542,6 +655,7 @@ def _search_at_depth_with_aspiration(board, current_depth, previous_score, use_a
         move, score, forced_mate = search_fixed_depth(
             board, current_depth, alpha=alpha, beta=beta,
             use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose,
+            executor=executor,
         )
 
         if forced_mate or (score > alpha and score < beta):
@@ -562,6 +676,7 @@ def _search_at_depth_with_aspiration(board, current_depth, previous_score, use_a
     return search_fixed_depth(
         board, current_depth,
         use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose,
+        executor=executor,
     )
 
 
@@ -611,84 +726,96 @@ def search(board, use_tt=True, use_null=False, use_lmr=True, use_aspiration=True
     best_move = None
     best_score = None
 
-    if max_time is None:
-        # Fixed-depth mode: exactly one search, directly at the requested
-        # depth - no iteration, no aspiration window (nothing to aim at).
-        nodes_evaluated = 0
-        tt_hits = 0
-        null_move_cutoffs = 0
-        lmr_reductions = 0
+    use_parallel_executor = (
+        not verbose
+        and (os.cpu_count() or 1) > 1
+        and max_depth >= ROOT_PARALLEL_MIN_DEPTH
+    )
+    executor = ProcessPoolExecutor(max_workers=os.cpu_count() or 1) if use_parallel_executor else None
 
-        depth_start = time.perf_counter()
-        best_move, best_score, forced_mate = search_fixed_depth(
-            board, max_depth, use_tt=use_tt, use_null=use_null, use_lmr=use_lmr, verbose=verbose
-        )
-        depth_elapsed = time.perf_counter() - depth_start
-        total_elapsed = time.perf_counter() - start_time
+    try:
+        if max_time is None:
+            # Fixed-depth mode: exactly one search, directly at the requested
+            # depth - no iteration, no aspiration window (nothing to aim at).
+            _reset_search_counters()
 
-        if uci_output and best_move is not None:
-            nps = int(nodes_evaluated / depth_elapsed) if depth_elapsed > 0.001 else 0
-            cp = int(max(-100000, min(100000, best_score)))
-            pv = best_move.uci()
-            print(f"info depth {max_depth} score cp {cp} nodes {nodes_evaluated} nps {nps} time {int(total_elapsed * 1000)} pv {pv}")
-            sys.stdout.flush()
-
-        if verbose:
-            print(f"Board evaluation: {eval.evaluate(board)}")
-
-        return best_move
-
-    # Iterative deepening mode: search depth 1, 2, 3, ... until the time
-    # budget runs out or max_depth is reached.
-    current_depth = 1
-    previous_score = None
-
-    while current_depth <= max_depth:
-        nodes_evaluated = 0
-        tt_hits = 0
-        null_move_cutoffs = 0
-        lmr_reductions = 0
-
-        depth_start = time.perf_counter()
-        deadline = (start_time + max_time) if max_time is not None else None
-        move, score, forced_mate = _search_at_depth_with_aspiration(
-            board, current_depth, previous_score, use_aspiration,
-            use_tt, use_null, use_lmr, verbose, deadline=deadline,
-        )
-        depth_elapsed = time.perf_counter() - depth_start
-        total_elapsed = time.perf_counter() - start_time
-
-        if move is not None:
-            best_move = move
-            best_score = score
-            previous_score = score
-
-        if uci_output and best_move is not None:
-            nps = int(nodes_evaluated / depth_elapsed) if depth_elapsed > 0.001 else 0
-            # Clamp score away from inf/-inf (checkmate scores)
-            cp = int(max(-100000, min(100000, best_score)))
-            pv = best_move.uci()
-            print(f"info depth {current_depth} score cp {cp} nodes {nodes_evaluated} nps {nps} time {int(total_elapsed * 1000)} pv {pv}")
-            sys.stdout.flush()
-
-        if verbose:
-            print(
-                f"Depth {current_depth} complete - Best move: {best_move}, Best score: {best_score}, "
-                f"Nodes evaluated: {nodes_evaluated}, TT hits: {tt_hits}, "
-                f"Null cutoffs: {null_move_cutoffs}, LMR reductions: {lmr_reductions}, "
-                f"Depth time: {depth_elapsed:.3f}s, Total time: {total_elapsed:.3f}s"
+            depth_start = time.perf_counter()
+            best_move, best_score, forced_mate = search_fixed_depth(
+                board,
+                max_depth,
+                use_tt=use_tt,
+                use_null=use_null,
+                use_lmr=use_lmr,
+                verbose=verbose,
+                executor=executor,
             )
+            depth_elapsed = time.perf_counter() - depth_start
+            total_elapsed = time.perf_counter() - start_time
 
-        if forced_mate:
-            break
+            if uci_output and best_move is not None:
+                nps = int(nodes_evaluated / depth_elapsed) if depth_elapsed > 0.001 else 0
+                cp = int(max(-100000, min(100000, best_score)))
+                pv = best_move.uci()
+                print(f"info depth {max_depth} score cp {cp} nodes {nodes_evaluated} nps {nps} time {int(total_elapsed * 1000)} pv {pv}")
+                sys.stdout.flush()
 
-        remaining_time = max_time - total_elapsed
-        projected_next_depth_time = depth_elapsed * ID_NEXT_DEPTH_TIME_MULTIPLIER
+            if verbose:
+                print(f"Board evaluation: {eval.evaluate(board)}")
 
-        if remaining_time <= 0 or projected_next_depth_time > remaining_time:
-            break
+            return best_move
 
-        current_depth += 1
+        # Iterative deepening mode: search depth 1, 2, 3, ... until the time
+        # budget runs out or max_depth is reached.
+        current_depth = 1
+        previous_score = None
+
+        while current_depth <= max_depth:
+            _reset_search_counters()
+
+            depth_start = time.perf_counter()
+            deadline = (start_time + max_time) if max_time is not None else None
+            move, score, forced_mate = _search_at_depth_with_aspiration(
+                board, current_depth, previous_score, use_aspiration,
+                use_tt, use_null, use_lmr, verbose, deadline=deadline,
+                executor=executor,
+            )
+            depth_elapsed = time.perf_counter() - depth_start
+            total_elapsed = time.perf_counter() - start_time
+
+            if move is not None:
+                best_move = move
+                best_score = score
+                previous_score = score
+
+            if uci_output and best_move is not None:
+                nps = int(nodes_evaluated / depth_elapsed) if depth_elapsed > 0.001 else 0
+                # Clamp score away from inf/-inf (checkmate scores)
+                cp = int(max(-100000, min(100000, best_score)))
+                pv = best_move.uci()
+                print(f"info depth {current_depth} score cp {cp} nodes {nodes_evaluated} nps {nps} time {int(total_elapsed * 1000)} pv {pv}")
+                sys.stdout.flush()
+
+            if verbose:
+                print(
+                    f"Depth {current_depth} complete - Best move: {best_move}, Best score: {best_score}, "
+                    f"Nodes evaluated: {nodes_evaluated}, TT hits: {tt_hits}, "
+                    f"Null cutoffs: {null_move_cutoffs}, LMR reductions: {lmr_reductions}, "
+                    f"Depth time: {depth_elapsed:.3f}s, Total time: {total_elapsed:.3f}s"
+                )
+
+            if forced_mate:
+                break
+
+            remaining_time = max_time - total_elapsed
+            projected_next_depth_time = depth_elapsed * ID_NEXT_DEPTH_TIME_MULTIPLIER
+
+            if remaining_time <= 0 or projected_next_depth_time > remaining_time:
+                break
+
+            current_depth += 1
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=False)
 
     if verbose:
         print(f"Board evaluation: {eval.evaluate(board)}")

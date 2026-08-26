@@ -7,7 +7,7 @@ A free, open source, Python-based chess engine with advanced search algorithms, 
 
 Version `0.2.2`
 ELO `~1550`
-NPS `~2200`
+NPS `~2700`
 
 </div>
 
@@ -16,7 +16,7 @@ NPS `~2200`
 - Estimated ~600ELO on Chess.com against Komodo 6 at 1000ELO (0.1.1)
 - Estimated ~900ELO on chessigma.com against Stockfish 18 at max (0.2.0)
 - Estimated ~1450ELO on chessigma.com against Stockfish 18 at max (0.2.1)
-- Estimated **~1550ELO** on chessigma.com against Stockfish 18 at max (0.2.2)
+- Estimated **~1550ELO** on chessigma.com against Stockfish 18 at max (Pre-release 0.2.2)
 > Chess.com is not used anymore because the rating estimator requires both players to have an official established rating attached to the game (e.g., in imported PGNs). If the ratings are missing or set to zero, the estimator will return zero/nothing. Chessigma is used to benchmark engine versions.
 
 ## Features
@@ -25,6 +25,7 @@ NPS `~2200`
 - **UCI-Compatible Chess**: Built on the `python-chess` library for full legal move validation and chess rule support
 - **Minimax Search with Alpha-Beta Pruning**: Efficient game tree exploration with alpha-beta pruning for optimal move selection
 - **Iterative Deepening**: Searches depth 1, then 2, then 3, and so on, using each shallow iteration's best move to improve move ordering for the next - stopping once a time budget runs out or a maximum depth is reached. Falls back to a plain fixed-depth search when no time budget is given (adjustable via the `DEPTH` constant in `search.py`, default 4 plies)
+- **Multi-Core Root Search**: Evaluates root moves in parallel across CPU cores when the position is deep and wide enough to benefit from it, while keeping the deeper alpha-beta recursion unchanged
 
 > Note: Aurelius is a command line program. You may want to use it in your own chess GUI.
 > It is confirmed that CuteChess is compatible.
@@ -54,6 +55,10 @@ NPS `~2200`
   - If the guess is right, the next real search starts with cached analysis already in place instead of starting cold
   - `play.py`: pondering runs synchronously in the gap before prompting for your move (configurable via `PONDER_ENABLED`/`PONDER_TIME_SECONDS`)
   - `uci.py`: full UCI ponder protocol support (`go ponder` / `ponderhit` / `stop`) via a background thread, so the engine stays responsive to GUI commands while pondering - only one search ever runs at a time, the thread just keeps stdin from blocking
+
+- **Parallel Root Move Evaluation**: Uses a `ProcessPoolExecutor` for root move search in fixed-depth and iterative-deepening mode when the search is deep enough and the position has enough legal moves to make the overhead worthwhile
+  - This works around Python's GIL by using separate processes instead of threads, so the search can actually spread across CPU cores
+  - Automatically stays off in verbose mode and in shallow positions where parallel overhead would outweigh the gain
 
 - **Aspiration windows**: Narrows each iterative-deepening depth's search window around the previous depth's score instead of always searching the full range, widening and re-searching if the guess is wrong
   - ~17% fewer nodes for the same result in quiet/stable positions
@@ -133,6 +138,7 @@ NPS `~2200`
 - **Verbose Logging**: Optional detailed move analysis and statistics, including per-depth iterative deepening output
 - **Error Handling**: Graceful handling of illegal moves with informative error messages
 - **Performance Metrics**: Tracks nodes evaluated, TT cache hits, null move cutoffs, and LMR reductions per search
+- **Parallel Search Settings**: Root parallelism turns on only when depth is at least 4 plies and the position has at least 4 legal root moves
 
 ## Architecture
 
