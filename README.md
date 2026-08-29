@@ -117,6 +117,7 @@ NPS `~2700`
   - Position has more than 7 pieces
   - Lookup returns no valid moves
 - **Performance**: Fast, accurate endgame play through proven tablebase knowledge
+> Syzygy API is not used in default. It can be toggled on and off using the boolean variable `USE_SYZYGY` in `syzygy.py`.
 
 ### Interactive Gameplay
 - **Human vs Engine**: Play as White or Black against the engine
