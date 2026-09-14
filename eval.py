@@ -30,7 +30,7 @@ def evaluate(board):
         chess.KNIGHT: 30,
         chess.BISHOP: 30,
         chess.ROOK: 50,
-        chess.QUEEN: 90,
+        chess.QUEEN: 100,
         chess.KING: 0
     }
 
